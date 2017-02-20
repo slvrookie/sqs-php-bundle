@@ -7,34 +7,31 @@ use Symfony\Component\DependencyInjection\ContainerAwareTrait;
 use SqsPhpBundle\Queue\Queue;
 use Aws\Sqs\SqsClient;
 
-
-
-
-class Worker implements ContainerAwareInterface
-{
+class Worker implements ContainerAwareInterface {
 
     use ContainerAwareTrait;
 
-
-    const SERVICE_NAME   = 0;
+    const SERVICE_NAME = 0;
     const SERVICE_METHOD = 1;
 
     private $sqs_client;
     private $queue;
+    protected $maxRetries = 2;
+    protected $retries = 0;
 
-
-
-
-    public function __construct(SqsClient $an_sqs_client)
-    {
+    public function __construct(SqsClient $an_sqs_client) {
         $this->sqs_client = $an_sqs_client;
     }
 
-
-
-
-    public function start(Queue $a_queue)
-    {
+    //Short poll is the default behavior where a weighted random set of machines
+    // is sampled on a ReceiveMessage call. This means only the messages on the 
+    // sampled machines are returned. If the number of messages in the queue 
+    // is small (less than 1000), it is likely you will get fewer messages 
+    // than you requested per ReceiveMessage call. If the number of messages 
+    // in the queue is extremely small, you might not receive any messages in
+    //  a particular ReceiveMessage response; in which case you should repeat the request.
+    //http://docs.aws.amazon.com/aws-sdk-php/v2/api/class-Aws.Sqs.SqsClient.html#_receiveMessage
+    public function start(Queue $a_queue) {
         $this->queue = $a_queue;
 
         while (true) {
@@ -42,16 +39,16 @@ class Worker implements ContainerAwareInterface
         }
     }
 
-
-
-
-    private function fetchMessage()
-    {
+    private function fetchMessage() {
         $result = $this->sqs_client->receiveMessage(array(
             'QueueUrl' => $this->queue->url(),
         ));
 
         if (!$result->hasKey('Messages')) {
+            if ($this->retries >= $this->maxRetries) {
+                exit;
+            }
+            ++$this->retries;
             return;
         }
 
@@ -59,7 +56,7 @@ class Worker implements ContainerAwareInterface
         foreach ($all_messages as $message) {
             try {
                 $this->runWorker($message);
-            } catch(\Exception $e) {
+            } catch (\Exception $e) {
                 echo $e;
                 continue;
             }
@@ -69,38 +66,23 @@ class Worker implements ContainerAwareInterface
         }
     }
 
-
-
-
-    private function runWorker($message)
-    {
-        $callable = ($this->isService())
-                    ? $this->getServiceCallable()
-                    : $this->queue->worker();
+    private function runWorker($message) {
+        $callable = ($this->isService()) ? $this->getServiceCallable() : $this->queue->worker();
 
         call_user_func(
-            $callable,
-            $this->unserializeMessage($message['Body'])
+                $callable, $this->unserializeMessage($message['Body'])
         );
     }
 
-
-
-
-    private function isService()
-    {
+    private function isService() {
         return $this->container->has(
-            $this->queue->worker()[self::SERVICE_NAME]
+                        $this->queue->worker()[self::SERVICE_NAME]
         );
     }
 
-
-
-
-    private function getServiceCallable()
-    {
+    private function getServiceCallable() {
         $service = $this->container->get(
-            $this->queue->worker()[self::SERVICE_NAME]
+                $this->queue->worker()[self::SERVICE_NAME]
         );
 
         return array(
@@ -109,21 +91,13 @@ class Worker implements ContainerAwareInterface
         );
     }
 
-
-
-
-    protected function unserializeMessage($a_message)
-    {
+    protected function unserializeMessage($a_message) {
         return json_decode($a_message, true);
     }
 
-
-
-
-    private function deleteMessage($a_message_receipt_handle)
-    {
+    private function deleteMessage($a_message_receipt_handle) {
         $this->sqs_client->deleteMessage(array(
-            'QueueUrl'      => $this->queue->url(),
+            'QueueUrl' => $this->queue->url(),
             'ReceiptHandle' => $a_message_receipt_handle
         ));
     }

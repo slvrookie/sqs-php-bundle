@@ -42,6 +42,7 @@ class WorkerStartCommand extends ContainerAwareCommand
 
         $worker = $container->get('sqs_php.worker');
         $worker->start($queue);
+        exit();
     }
 
 }

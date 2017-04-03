@@ -16,7 +16,7 @@ class Worker implements ContainerAwareInterface {
 
     private $sqs_client;
     private $queue;
-    protected $maxRetries = 2;
+    protected $max_retries = 2;
     protected $retries = 0;
 
     public function __construct(SqsClient $an_sqs_client) {
@@ -34,9 +34,10 @@ class Worker implements ContainerAwareInterface {
     public function start(Queue $a_queue) {
         $this->queue = $a_queue;
 
-        while (true) {
+        while ($this->retries <= $this->max_retries) {
             $this->fetchMessage();
         }
+        return;
     }
 
     private function fetchMessage() {
@@ -45,9 +46,7 @@ class Worker implements ContainerAwareInterface {
         ));
 
         if (!$result->hasKey('Messages')) {
-            if ($this->retries >= $this->maxRetries) {
-                exit;
-            }
+            sleep(1);      
             ++$this->retries;
             return;
         }
